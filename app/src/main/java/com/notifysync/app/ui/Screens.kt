@@ -294,10 +294,18 @@ private val timeFormat = SimpleDateFormat("dd.MM. HH:mm:ss", Locale.GERMANY)
 @Composable
 private fun JournalScreen(engine: SyncEngine) {
     engine.observe()
+    val ctx = LocalContext.current
     val entries = engine.journal.all()
     Column(Modifier.fillMaxSize()) {
         Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
             Text("${entries.size} Einträge (7 Tage)", modifier = Modifier.weight(1f))
+            TextButton(onClick = {
+                val send = Intent(Intent.ACTION_SEND)
+                    .setType("text/plain")
+                    .putExtra(Intent.EXTRA_SUBJECT, "Notify-Sync Protokoll")
+                    .putExtra(Intent.EXTRA_TEXT, engine.journalAsText())
+                ctx.startActivity(Intent.createChooser(send, "Protokoll teilen"))
+            }) { Text("Teilen") }
             TextButton(onClick = { engine.clearJournal() }) { Text("Leeren") }
         }
         if (entries.isEmpty()) {

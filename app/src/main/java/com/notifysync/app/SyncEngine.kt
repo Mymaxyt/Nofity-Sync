@@ -327,6 +327,24 @@ class SyncEngine private constructor(private val ctx: Context) : FirebaseRelay.L
         changed()
     }
 
+    /** Protokoll als Text zum Teilen. Enthält App- und Chatnamen, aber keine Nachrichtentexte. */
+    fun journalAsText(): String {
+        val fmt = java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.GERMANY)
+        val head = buildString {
+            appendLine("Notify-Sync Protokoll")
+            appendLine("Gerät: $deviceId · Android ${android.os.Build.VERSION.RELEASE} · ${android.os.Build.MODEL}")
+            appendLine("App-Version: ${runCatching { ctx.packageManager.getPackageInfo(ctx.packageName, 0).versionName }.getOrNull()}")
+            appendLine("Probelauf: ${if (dryRun) "an" else "aus"} · Relay: $relayStatus · Dienst verbunden: $isServiceConnected")
+            appendLine("Ausgenommene Apps: ${excluded().joinToString().ifEmpty { "keine" }}")
+            appendLine()
+        }
+        return head + journal.all().joinToString("\n") { e ->
+            listOf(fmt.format(java.util.Date(e.time)), e.type.label, e.app, e.title, e.detail)
+                .filter { it.isNotBlank() }
+                .joinToString(" | ")
+        }
+    }
+
     fun logCrash(trace: String) {
         journal.add(LogType.ERROR, "", "App ist abgestürzt", trace)
         changed()
