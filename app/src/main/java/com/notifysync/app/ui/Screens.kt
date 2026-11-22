@@ -66,6 +66,13 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
+/**
+ * Liest den Änderungszähler der Engine als Compose-State. Jeder Bildschirm ruft das auf, damit er
+ * neu gezeichnet wird, sobald sich in der Engine etwas ändert (z. B. nach dem Koppeln).
+ */
+@Composable
+private fun SyncEngine.observe(): Int = changes.collectAsState().value
+
 private val TABS = listOf("Status", "Kopplung", "Protokoll", "Papierkorb", "Apps")
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -73,7 +80,6 @@ private val TABS = listOf("Status", "Kopplung", "Protokoll", "Papierkorb", "Apps
 fun NotifySyncApp(resumeTick: Int) {
     val ctx = LocalContext.current
     val engine = remember { SyncEngine.get(ctx) }
-    val version by engine.changes.collectAsState()
     var tab by rememberSaveable { mutableIntStateOf(if (engine.pairing == null) 1 else 0) }
 
     MaterialTheme(colorScheme = dynamicLightColorScheme(ctx)) {
@@ -82,15 +88,12 @@ fun NotifySyncApp(resumeTick: Int) {
                 ScrollableTabRow(selectedTabIndex = tab, edgePadding = 8.dp) {
                     TABS.forEachIndexed { i, t -> Tab(selected = tab == i, onClick = { tab = i }, text = { Text(t) }) }
                 }
-                // refresh ändert sich bei jeder Änderung in der Engine und beim Zurückkehren in die App,
-                // damit die Reiter neu gezeichnet werden.
-                val refresh = version * 1000 + resumeTick
                 when (tab) {
-                    0 -> StatusScreen(engine, refresh)
-                    1 -> PairingScreen(engine, refresh)
-                    2 -> JournalScreen(engine, refresh)
-                    3 -> TrashScreen(engine, refresh)
-                    else -> AppsScreen(engine, refresh)
+                    0 -> StatusScreen(engine, resumeTick)
+                    1 -> PairingScreen(engine)
+                    2 -> JournalScreen(engine)
+                    3 -> TrashScreen(engine)
+                    else -> AppsScreen(engine)
                 }
             }
         }
@@ -100,10 +103,15 @@ fun NotifySyncApp(resumeTick: Int) {
 // ------------------------------------------------------------------------------------ Status
 
 @Composable
-private fun StatusScreen(engine: SyncEngine, @Suppress("UNUSED_PARAMETER") refresh: Int) {
+private fun StatusScreen(engine: SyncEngine, resumeTick: Int) {
     val ctx = LocalContext.current
-    val listenerOk = NotificationManagerCompat.getEnabledListenerPackages(ctx).contains(ctx.packageName)
-    val batteryOk = (ctx.getSystemService(Context.POWER_SERVICE) as PowerManager).isIgnoringBatteryOptimizations(ctx.packageName)
+    val version = engine.observe()
+    val listenerOk = remember(resumeTick, version) {
+        NotificationManagerCompat.getEnabledListenerPackages(ctx).contains(ctx.packageName)
+    }
+    val batteryOk = remember(resumeTick, version) {
+        (ctx.getSystemService(Context.POWER_SERVICE) as PowerManager).isIgnoringBatteryOptimizations(ctx.packageName)
+    }
     var confirmLive by remember { mutableStateOf(false) }
 
     Column(Modifier.verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -205,7 +213,8 @@ private fun openAppInfo(ctx: Context) {
 // ------------------------------------------------------------------------------------ Kopplung
 
 @Composable
-private fun PairingScreen(engine: SyncEngine, @Suppress("UNUSED_PARAMETER") refresh: Int) {
+private fun PairingScreen(engine: SyncEngine) {
+    engine.observe()
     val ctx = LocalContext.current
     var projectId by rememberSaveable { mutableStateOf("") }
     var appId by rememberSaveable { mutableStateOf("") }
@@ -248,7 +257,10 @@ private fun PairingScreen(engine: SyncEngine, @Suppress("UNUSED_PARAMETER") refr
             OutlinedTextField(apiKey, { apiKey = it }, label = { Text("Web-API-Schlüssel (AIza…)") }, singleLine = true, modifier = Modifier.fillMaxWidth())
             Button(
                 enabled = projectId.isNotBlank() && appId.isNotBlank() && apiKey.isNotBlank(),
-                onClick = { engine.createPairing(projectId, appId, apiKey) },
+                onClick = {
+                    runCatching { engine.createPairing(projectId, appId, apiKey) }
+                        .onFailure { Toast.makeText(ctx, "Kopplung fehlgeschlagen: ${it.message}", Toast.LENGTH_LONG).show() }
+                },
             ) { Text("Kopplung erstellen") }
 
             Spacer(Modifier.height(16.dp))
@@ -280,7 +292,8 @@ private fun PairingScreen(engine: SyncEngine, @Suppress("UNUSED_PARAMETER") refr
 private val timeFormat = SimpleDateFormat("dd.MM. HH:mm:ss", Locale.GERMANY)
 
 @Composable
-private fun JournalScreen(engine: SyncEngine, @Suppress("UNUSED_PARAMETER") refresh: Int) {
+private fun JournalScreen(engine: SyncEngine) {
+    engine.observe()
     val entries = engine.journal.all()
     Column(Modifier.fillMaxSize()) {
         Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -313,7 +326,8 @@ private fun JournalScreen(engine: SyncEngine, @Suppress("UNUSED_PARAMETER") refr
 // ------------------------------------------------------------------------------------ Papierkorb
 
 @Composable
-private fun TrashScreen(engine: SyncEngine, @Suppress("UNUSED_PARAMETER") refresh: Int) {
+private fun TrashScreen(engine: SyncEngine) {
+    engine.observe()
     val ctx = LocalContext.current
     val entries = engine.trash.all()
     Column(Modifier.fillMaxSize()) {
@@ -342,7 +356,8 @@ private fun TrashScreen(engine: SyncEngine, @Suppress("UNUSED_PARAMETER") refres
 // ------------------------------------------------------------------------------------ Apps
 
 @Composable
-private fun AppsScreen(engine: SyncEngine, @Suppress("UNUSED_PARAMETER") refresh: Int) {
+private fun AppsScreen(engine: SyncEngine) {
+    engine.observe()
     val excluded = engine.excluded()
     val apps = engine.seenPackages().map { it to engine.appLabel(it) }.sortedBy { it.second.lowercase() }
     Column(Modifier.fillMaxSize()) {

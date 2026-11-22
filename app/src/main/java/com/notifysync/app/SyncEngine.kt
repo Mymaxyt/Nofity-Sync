@@ -327,6 +327,11 @@ class SyncEngine private constructor(private val ctx: Context) : FirebaseRelay.L
         changed()
     }
 
+    fun logCrash(trace: String) {
+        journal.add(LogType.ERROR, "", "App ist abgestürzt", trace)
+        changed()
+    }
+
     fun clearJournal() {
         journal.clear()
         loggedDecisions.clear()
