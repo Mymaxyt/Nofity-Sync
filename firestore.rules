@@ -1,0 +1,17 @@
+rules_version = '2';
+// Notify-Sync Relay: nur verschlüsselte Pakete unter einer zufälligen Kanal-ID.
+// Ohne die Kanal-ID (sie steckt im Kopplungs-QR-Code) kann niemand etwas finden oder lesen,
+// und selbst dann nur Chiffretext.
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /pairs/{pairId}/events/{eventId} {
+      allow read: if request.auth != null;
+      allow create: if request.auth != null
+        && request.resource.data.keys().hasOnly(['d', 't', 'c', 'x'])
+        && request.resource.data.c is bytes
+        && request.resource.data.c.size() < 16384
+        && request.resource.data.t is int;
+      allow update, delete: if false;
+    }
+  }
+}
