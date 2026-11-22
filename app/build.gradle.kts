@@ -16,8 +16,8 @@ android {
         applicationId = "com.notifysync.app"
         minSdk = 33 // Android 13
         targetSdk = 36
-        versionCode = 2
-        versionName = "0.1.1-test"
+        versionCode = 3
+        versionName = "0.1.2-test"
     }
 
     // Fester Test-Schlüssel (wie der Android-Debug-Schlüssel, kein Geheimnis), damit sich neue

@@ -82,6 +82,22 @@ class SyncEngine private constructor(private val ctx: Context) : FirebaseRelay.L
             changed()
         }
 
+    /** Testphase: jede Benachrichtigung mit allen Eigenschaften protokollieren. Standard an. */
+    var detailLog: Boolean
+        get() = prefs.getBoolean("detailLog", true)
+        set(v) {
+            prefs.edit().putBoolean("detailLog", v).apply()
+            changed()
+        }
+
+    /** Titel/Texte/Nachrichten im Detailprotokoll ausschreiben. Standard aus (nur Längen). */
+    var logContent: Boolean
+        get() = prefs.getBoolean("logContent", false)
+        set(v) {
+            prefs.edit().putBoolean("logContent", v).apply()
+            changed()
+        }
+
     fun excluded(): Set<String> = prefs.getStringSet("excluded", emptySet()).orEmpty()
     fun seenPackages(): Set<String> = prefs.getStringSet("seen", emptySet()).orEmpty()
 
@@ -173,6 +189,7 @@ class SyncEngine private constructor(private val ctx: Context) : FirebaseRelay.L
     }
 
     fun onPosted(sbn: StatusBarNotification) {
+        logDetails(sbn, null)
         if (!relevant(sbn)) return
         markSeen(sbn.packageName)
         val touched = HashSet<Pair<String, String>>()
@@ -181,6 +198,7 @@ class SyncEngine private constructor(private val ctx: Context) : FirebaseRelay.L
     }
 
     fun onRemoved(sbn: StatusBarNotification, reason: Int) {
+        logDetails(sbn, reason)
         if (!relevant(sbn)) return
         val r = rules ?: return
         val snap = Snapshots.from(sbn)
@@ -357,6 +375,80 @@ class SyncEngine private constructor(private val ctx: Context) : FirebaseRelay.L
     }
 
     // ---------------------------------------------------------------- Hilfen
+
+    private val lastDetailLog = HashMap<String, Long>()
+
+    /** Detailprotokoll: alle Eigenschaften einer Benachrichtigung, Inhalte nur auf Wunsch. */
+    private fun logDetails(sbn: StatusBarNotification, removalReason: Int?) {
+        if (!detailLog || sbn.packageName == ctx.packageName) return
+        val now = System.currentTimeMillis()
+        if (removalReason == null) {
+            // Laufend aktualisierte Benachrichtigungen (Fortschritt, Musik) höchstens alle 30 s.
+            val last = lastDetailLog[sbn.key]
+            if (last != null && now - last < 30_000) return
+            lastDetailLog[sbn.key] = now
+            if (lastDetailLog.size > 500) lastDetailLog.clear()
+        }
+        val details = runCatching { describeDetails(sbn, removalReason) }.getOrElse { "Konnte nicht gelesen werden: ${it.message}" }
+        val snapTitle = runCatching { Snapshots.from(sbn).let { it.conversationTitle ?: it.title } }.getOrNull().orEmpty()
+        journal.add(
+            if (removalReason == null) LogType.DETAIL_POSTED else LogType.DETAIL_REMOVED,
+            appLabel(sbn.packageName),
+            if (logContent) snapTitle else "",
+            details,
+        )
+        changed()
+    }
+
+    private fun describeDetails(sbn: StatusBarNotification, removalReason: Int?): String {
+        val n = sbn.notification
+        val ex = n.extras
+        val s = Snapshots.from(sbn)
+        val fmt = java.text.SimpleDateFormat("HH:mm:ss", java.util.Locale.GERMANY)
+        fun content(v: String?): String = when {
+            v.isNullOrEmpty() -> "–"
+            logContent -> v.take(300)
+            else -> "[${v.length} Zeichen]"
+        }
+        val flags = buildList {
+            if (n.flags and android.app.Notification.FLAG_ONGOING_EVENT != 0) add("laufend")
+            if (n.flags and android.app.Notification.FLAG_FOREGROUND_SERVICE != 0) add("Vordergrunddienst")
+            if (n.flags and android.app.Notification.FLAG_NO_CLEAR != 0) add("nicht löschbar")
+            if (n.flags and android.app.Notification.FLAG_AUTO_CANCEL != 0) add("schließt bei Tipp")
+            if (n.flags and android.app.Notification.FLAG_ONLY_ALERT_ONCE != 0) add("nur einmal Ton")
+            if (n.flags and android.app.Notification.FLAG_GROUP_SUMMARY != 0) add("Sammelbenachrichtigung")
+            if (n.flags and android.app.Notification.FLAG_LOCAL_ONLY != 0) add("nur lokal")
+            if (n.flags and android.app.Notification.FLAG_BUBBLE != 0) add("Bubble")
+        }
+        val chatId = s.conversationId
+        val chatIdText = when {
+            chatId.isNullOrBlank() -> "fehlt"
+            chatId.contains('@') -> "vorhanden (…@${chatId.substringAfter('@')})"
+            else -> "vorhanden (${chatId.length} Zeichen)"
+        }
+        val msgs = s.messages.joinToString("; ") { m ->
+            fmt.format(java.util.Date(m.timestamp)) + if (logContent) " ${m.sender}: ${m.text.take(120)}" else " [${m.text.length} Zeichen]"
+        }
+        return buildString {
+            if (removalReason != null) {
+                val why = rules?.describeReason(removalReason) ?: "Grund $removalReason"
+                val signal = if (removalReason == RemovalReasons.CLICK || removalReason == RemovalReasons.APP_CANCEL) "zählt als gelesen" else "zählt nicht als gelesen"
+                appendLine("Entfernt: $why (Code $removalReason) → $signal")
+            }
+            appendLine("Paket: ${sbn.packageName} · Kanal: ${n.channelId ?: "–"} · Kategorie: ${n.category ?: "–"}")
+            appendLine("Chat-ID: $chatIdText · Chat-Titel: ${content(s.conversationTitle)}")
+            appendLine("Titel: ${content(s.title)} · Text: ${content(s.text)}")
+            if (!s.bigText.isNullOrEmpty() || !s.subText.isNullOrEmpty()) appendLine("Langtext: ${content(s.bigText)} · Untertext: ${content(s.subText)}")
+            appendLine("Nachrichten: ${s.messages.size}${if (msgs.isNotEmpty()) " ($msgs)" else ""}")
+            appendLine("Vorlage: ${ex.getString(android.app.Notification.EXTRA_TEMPLATE)?.substringAfterLast('$') ?: "–"} · Gruppe: ${n.group ?: "–"}")
+            appendLine("Flags: ${flags.joinToString().ifEmpty { "–" }}")
+            val progressMax = ex.getInt(android.app.Notification.EXTRA_PROGRESS_MAX, 0)
+            if (progressMax > 0) appendLine("Fortschritt: ${ex.getInt(android.app.Notification.EXTRA_PROGRESS, 0)}/$progressMax")
+            appendLine("Live-Benachrichtigung: ${if (s.isLive) "ja (nie abgeglichen)" else "nein"} · Geschwärzt: ${if (s.isRedacted) "ja" else "nein"}")
+            appendLine("Aktionen: ${n.actions?.size ?: 0} · Öffnen-Ziel: ${if (n.contentIntent != null) "ja" else "nein"} · Ausgenommen: ${if (sbn.packageName in excluded()) "ja" else "nein"}")
+            append("Erstellt: ${fmt.format(java.util.Date(sbn.postTime))} · Nutzer: ${sbn.user.hashCode()} · Schlüssel: …${sbn.key.takeLast(12)}")
+        }
+    }
 
     private fun relevant(sbn: StatusBarNotification): Boolean =
         rules != null &&

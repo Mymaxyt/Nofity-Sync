@@ -1,5 +1,7 @@
 package com.notifysync.app.storage
 
+import android.os.Handler
+import android.os.Looper
 import com.notifysync.core.EventKind
 import com.notifysync.core.ReadEvent
 import com.notifysync.core.ReadReason
@@ -31,6 +33,8 @@ enum class LogType(val label: String) {
     REMOVED("Entfernt"),
     KEPT("Stehen gelassen"),
     IGNORED("Nicht gemeldet"),
+    DETAIL_POSTED("Details: angezeigt"),
+    DETAIL_REMOVED("Details: verschwunden"),
     INFO("Info"),
     ERROR("Fehler"),
 }
@@ -63,11 +67,16 @@ class Journal(private val vault: Vault) {
         }
     }
 
+    private val handler = Handler(Looper.getMainLooper())
+    private val saveTask = Runnable { synchronized(this) { save() } }
+
     @Synchronized
     fun add(type: LogType, app: String, title: String, detail: String) {
-        entries += LogEntry(System.currentTimeMillis(), type, app, title.take(120), detail)
+        entries += LogEntry(System.currentTimeMillis(), type, app, title.take(120), detail.take(3000))
         prune()
-        save()
+        // Gebündelt speichern: im Detailmodus kommen viele Einträge kurz hintereinander.
+        handler.removeCallbacks(saveTask)
+        handler.postDelayed(saveTask, 2_000)
     }
 
     @Synchronized
@@ -82,7 +91,7 @@ class Journal(private val vault: Vault) {
     private fun prune() {
         val cutoff = System.currentTimeMillis() - 7 * DAY
         entries.removeAll { it.time < cutoff }
-        while (entries.size > 500) entries.removeAt(0)
+        while (entries.size > 3000) entries.removeAt(0)
     }
 
     private fun save() {

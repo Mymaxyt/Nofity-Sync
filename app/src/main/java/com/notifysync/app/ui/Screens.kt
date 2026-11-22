@@ -166,6 +166,25 @@ private fun StatusScreen(engine: SyncEngine, resumeTick: Int) {
         }
 
         Card(Modifier.fillMaxWidth()) {
+            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text("Detailprotokoll", fontWeight = FontWeight.Bold)
+                        Text("Jede Benachrichtigung mit allen Eigenschaften (App, Kanal, Chat-ID, Flags, Grund des Verschwindens …) im Protokoll.")
+                    }
+                    Switch(checked = engine.detailLog, onCheckedChange = { engine.detailLog = it })
+                }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text("Inhalte mitprotokollieren", fontWeight = FontWeight.Bold)
+                        Text("Aus: nur Länge der Texte. An: Titel und Nachrichtentexte stehen im Protokoll und beim Teilen in der Datei.")
+                    }
+                    Switch(checked = engine.logContent, onCheckedChange = { engine.logContent = it })
+                }
+            }
+        }
+
+        Card(Modifier.fillMaxWidth()) {
             Column(Modifier.padding(16.dp)) {
                 Text("Cloud-Relay", fontWeight = FontWeight.Bold)
                 Text(engine.relayStatus)
@@ -318,6 +337,7 @@ private fun JournalScreen(engine: SyncEngine) {
                     LogType.REMOVED -> Color(0xFF2E7D32)
                     LogType.KEPT -> Color(0xFF8D6E00)
                     LogType.ERROR -> Color(0xFFC62828)
+                    LogType.DETAIL_POSTED, LogType.DETAIL_REMOVED -> Color(0xFF6B6B6B)
                     else -> Color.Unspecified
                 }
                 Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp)) {
